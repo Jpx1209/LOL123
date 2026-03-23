@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ARSBOT Web Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdn.socket.io/4.5.0/socket.io.min.js"></script>
+</head>
+<body>
+    <div class="container py-4">
+        <!-- Header -->
+        <div class="text-center mb-4">
+            <h1 class="display-4 text-success">ARSBOT CONTROL PANEL</h1>
+            <p class="text-muted">Web Dashboard – bot Onluyen.vn</p>
+            <div>
+                <span class="link-icon me-3" onclick="window.open('https://discord.gg/XjSRYTsjSZ')">🌐 Discord</span>
+                <span class="link-icon me-3" onclick="window.open('https://www.facebook.com/ohieu.001')">📘 Facebook</span>
+                <span class="link-icon" onclick="window.open('https://github.com/Jpx1209/Auto-app-onluyen-')">📖 Wiki</span>
+            </div>
+        </div>
+
+        <!-- Main content: 2 columns -->
+        <div class="row g-4">
+            <!-- Cột trái: Tài khoản & API -->
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">👥 Tài khoản & 🔑 API</div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label">Danh sách tài khoản (mỗi dòng: username | password)</label>
+                            <textarea class="form-control" id="accounts" rows="5" placeholder="user1 | pass1&#10;user2 | pass2"></textarea>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Gemini API Keys (cách nhau bằng dấu phẩy)</label>
+                            <div class="input-group">
+                                <input type="password" class="form-control" id="api_keys" placeholder="key1,key2,key3">
+                                <button class="btn btn-outline-secondary" type="button" id="toggleApiKey">
+                                    <i class="bi bi-eye"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Cột phải: Bài tập -->
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">📚 Bài tập</div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label">Link bài tập (mỗi link một dòng)</label>
+                            <textarea class="form-control" id="urls" rows="3" placeholder="https://app.onluyen.vn/assignment/..."></textarea>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Số câu hỏi tương ứng (cách nhau dấu phẩy, hoặc một số chung)</label>
+                            <input type="text" class="form-control" id="questions" placeholder="VD: 20,10,10,30 hoặc 20">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Nút điều khiển -->
+        <div class="row mt-4">
+            <div class="col text-center">
+                <button class="btn btn-success btn-lg me-3" id="startBtn" onclick="startBot()">START BOT</button>
+                <button class="btn btn-danger btn-lg" id="stopBtn" onclick="stopBot()" disabled>STOP BOT</button>
+            </div>
+        </div>
+
+        <!-- Trạng thái -->
+        <div class="row mt-3">
+            <div class="col">
+                <div class="alert alert-info" id="status">⚙️ Status: Idle</div>
+            </div>
+        </div>
+
+        <!-- Log -->
+        <div class="row mt-3">
+            <div class="col">
+                <div class="card">
+                    <div class="card-header">📋 SYSTEM LOG</div>
+                    <div class="card-body">
+                        <div id="log"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        let isBotRunning = false;
+
+        // Toggle hiện/ẩn API key
+        const toggleApiKey = document.getElementById('toggleApiKey');
+        const apiKeyInput = document.getElementById('api_keys');
+        const eyeIconApi = toggleApiKey.querySelector('i');
+        toggleApiKey.addEventListener('click', function() {
+            const type = apiKeyInput.getAttribute('type') === 'password' ? 'text' : 'password';
+            apiKeyInput.setAttribute('type', type);
+            if (type === 'password') {
+                eyeIconApi.classList.remove('bi-eye-slash');
+                eyeIconApi.classList.add('bi-eye');
+            } else {
+                eyeIconApi.classList.remove('bi-eye');
+                eyeIconApi.classList.add('bi-eye-slash');
+            }
+        });
+
+        // Socket events
+        socket.on('connect', function() {
+            console.log('Connected to server');
+        });
+
+        socket.on('log', function(data) {
+            const logDiv = document.getElementById('log');
+            logDiv.innerHTML += data.message + '<br>';
+            logDiv.scrollTop = logDiv.scrollHeight;
+        });
+
+        socket.on('bot_started', function(data) {
+            isBotRunning = true;
+            setButtons(true);
+        });
+
+        socket.on('bot_stopped', function(data) {
+            isBotRunning = false;
+            setButtons(false);
+        });
+
+        socket.on('bot_finished', function() {
+            isBotRunning = false;
+            setButtons(false);
+        });
+
+        socket.on('error', function(data) {
+            alert('Lỗi: ' + data.message);
+        });
+
+        function setButtons(running) {
+            document.getElementById('startBtn').disabled = running;
+            document.getElementById('stopBtn').disabled = !running;
+            document.getElementById('status').innerHTML = running ? '⚙️ Status: Running' : '⚙️ Status: Idle';
+        }
+
+        function startBot() {
+            const accounts = document.getElementById('accounts').value;
+            const api_keys = document.getElementById('api_keys').value;
+            const urls = document.getElementById('urls').value;
+            const questions = document.getElementById('questions').value;
+
+            if (!accounts || !api_keys || !urls || !questions) {
+                alert('Vui lòng điền đầy đủ thông tin');
+                return;
+            }
+
+            socket.emit('start_bot', {
+                accounts: accounts,
+                api_keys: api_keys,
+                urls: urls,
+                questions: questions
+            });
+        }
+
+        function stopBot() {
+            socket.emit('stop_bot');
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+flask
+flask-socketio
+eventlet
+playwright
+google-generativeai
+python-dotenv
+customtkinter
+Pillow
