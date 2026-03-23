@@ -35,14 +35,12 @@ def handle_disconnect():
         del active_bots[session_id]
 
 def bot_worker(session_id, accounts, practice_items, api_keys):
-    """Chạy bot và gửi log qua socket"""
     bot_data = active_bots.get(session_id)
     if not bot_data:
         return
     log_queue = bot_data['log_queue']
     stop_event = bot_data['stop_event']
 
-    # Thread riêng để đọc queue và emit log
     def emit_log():
         while not stop_event.is_set() or not log_queue.empty():
             try:
@@ -50,7 +48,6 @@ def bot_worker(session_id, accounts, practice_items, api_keys):
                 socketio.emit('log', {'message': msg}, room=session_id)
             except queue.Empty:
                 continue
-        # Dọn queue còn sót
         while not log_queue.empty():
             try:
                 msg = log_queue.get_nowait()
@@ -62,13 +59,15 @@ def bot_worker(session_id, accounts, practice_items, api_keys):
     log_thread.start()
     bot_data['log_thread'] = log_thread
 
-    # Chạy bot
     try:
         run_bot(accounts, practice_items, api_keys, log_queue, headless=True, stop_event=stop_event)
     except Exception as e:
-        socketio.emit('log', {'message': f"❌ Lỗi bot: {e}"}, room=session_id)
+        import traceback
+        error_msg = f"❌ Lỗi bot: {e}\n{traceback.format_exc()}"
+        log_queue.put(error_msg)
+        socketio.emit('log', {'message': error_msg}, room=session_id)
     finally:
-        stop_event.set()  # Đảm bảo emit_log thoát
+        stop_event.set()
         log_thread.join(timeout=5)
         socketio.emit('bot_finished', room=session_id)
         if session_id in active_bots:
@@ -92,7 +91,7 @@ def handle_start_bot(data):
     urls_text = data.get('urls', '').strip()
     questions_input = data.get('questions', '').strip()
 
-    # Kiểm tra dữ liệu
+    # Kiểm tra dữ liệu đầu vào
     if not accounts_text:
         emit('error', {'message': 'Chưa nhập tài khoản'})
         return
@@ -118,10 +117,19 @@ def handle_start_bot(data):
         user, pwd = line.split('|', 1)
         accounts.append((user.strip(), pwd.strip()))
 
-    # Parse link bài tập
-    urls = [u.strip() for u in urls_text.splitlines() if u.strip()]
+    # Parse link bài tập + kiểm tra URL hợp lệ
+    urls = []
+    for line in urls_text.splitlines():
+        url = line.strip()
+        if not url:
+            continue
+        if not (url.startswith('http://') or url.startswith('https://')):
+            emit('error', {'message': f'URL không hợp lệ (phải bắt đầu bằng http:// hoặc https://): {url}'})
+            return
+        urls.append(url)
+
     if not urls:
-        emit('error', {'message': 'Không có link bài tập'})
+        emit('error', {'message': 'Không có link bài tập hợp lệ'})
         return
 
     # Parse số câu
